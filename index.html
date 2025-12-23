@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Kuchařka Cloud Pro Edit</title>
+    <title>Kuchařka Cloud Pro - Smart Scaling</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -25,7 +25,8 @@
         const db = getFirestore(app);
         const auth = getAuth(app);
 
-        window.editingId = null; // Sleduje, zda editujeme nebo přidáváme
+        window.editingId = null;
+        window.currentRecipeIngredients = []; // Pro dynamický seznam v editoru
 
         // --- AUTH ---
         window.login = async () => {
@@ -36,7 +37,6 @@
             catch (e) { alert("Chyba přihlášení."); }
         };
         window.logout = () => signOut(auth);
-
         onAuthStateChanged(auth, (user) => {
             window.userLoggedIn = !!user;
             document.getElementById('admin-ui').classList.toggle('hidden', !user);
@@ -69,36 +69,55 @@
             }
         };
 
+        // --- INGREDIENTS UI LOGIC ---
+        window.addIngredientField = (amount = "", unit = "", name = "") => {
+            const container = document.getElementById('ingredients-editor');
+            const div = document.createElement('div');
+            div.className = "flex gap-2 mb-2 ingredient-row";
+            div.innerHTML = `
+                <input type="number" placeholder="Množ." step="any" value="${amount}" class="w-20 p-2 bg-gray-50 rounded-lg ing-amount">
+                <input type="text" placeholder="Jedn." value="${unit}" class="w-16 p-2 bg-gray-50 rounded-lg ing-unit">
+                <input type="text" placeholder="Název" value="${name}" class="flex-1 p-2 bg-gray-50 rounded-lg ing-name">
+                <button onclick="this.parentElement.remove()" class="text-red-300 p-2">&times;</button>
+            `;
+            container.appendChild(div);
+        };
+
         // --- DATA LOGIKA ---
         window.saveRecipe = async () => {
             const title = document.getElementById('new-title').value.trim();
             if (!title) return alert("Název je povinný!");
 
+            // Sesbírat strukturované ingredience
+            const ingRows = document.querySelectorAll('.ingredient-row');
+            const ingredients = Array.from(ingRows).map(row => ({
+                amount: parseFloat(row.querySelector('.ing-amount').value) || 0,
+                unit: row.querySelector('.ing-unit').value,
+                name: row.querySelector('.ing-name').value
+            })).filter(i => i.name !== "");
+
             const btn = document.getElementById('save-btn');
             btn.disabled = true;
-            btn.innerText = "Ukládám...";
 
             const recipeData = {
                 title: title,
                 time: parseInt(document.getElementById('new-time').value) || 0,
                 diff: document.getElementById('new-difficulty').value,
-                ing: document.getElementById('new-ingredients').value.trim(),
                 steps: document.getElementById('new-steps').value.trim(),
+                ingredients: ingredients, // Nové pole
                 img: window.currentImgData || "https://images.unsplash.com/photo-1495195129352-aed325a55b65?w=400"
             };
 
             try {
                 if (window.editingId) {
-                    // AKTUALIZACE STÁVAJÍCÍHO
                     await updateDoc(doc(db, "recepty", window.editingId), recipeData);
                 } else {
-                    // PŘIDÁNÍ NOVÉHO
                     recipeData.createdAt = Date.now();
                     await addDoc(collection(db, "recepty"), recipeData);
                 }
                 closeModal('add-modal');
             } catch (e) { alert("Chyba: " + e.message); }
-            finally { btn.disabled = false; btn.innerText = "Uložit do cloudu"; }
+            finally { btn.disabled = false; }
         };
 
         window.deleteRecipe = async (id) => {
@@ -110,12 +129,19 @@
             if(!r) return;
             window.editingId = id;
             document.getElementById('modal-title-text').innerText = "Upravit recept";
-            document.getElementById('save-btn').innerText = "Aktualizovat recept";
             document.getElementById('new-title').value = r.title;
             document.getElementById('new-time').value = r.time;
             document.getElementById('new-difficulty').value = r.diff;
-            document.getElementById('new-ingredients').value = r.ing;
             document.getElementById('new-steps').value = r.steps;
+            
+            // Vyčistit a naplnit ingredience
+            document.getElementById('ingredients-editor').innerHTML = "";
+            if (r.ingredients && Array.isArray(r.ingredients)) {
+                r.ingredients.forEach(i => addIngredientField(i.amount, i.unit, i.name));
+            } else if (r.ing) { // Starý formát
+                addIngredientField(0, "", r.ing);
+            }
+            
             window.currentImgData = r.img;
             document.getElementById('preview-el').src = r.img;
             document.getElementById('preview-box').classList.remove('hidden');
@@ -132,8 +158,8 @@
 <body class="bg-gray-100 font-sans">
 
 <div class="max-w-md mx-auto min-h-screen bg-white shadow-2xl pb-24 relative">
-    <header class="bg-white/95 backdrop-blur-md sticky top-0 z-40 px-6 py-5 border-b text-center">
-        <div class="flex justify-between items-center mb-4 text-left">
+    <header class="bg-white/95 backdrop-blur-md sticky top-0 z-40 px-6 py-5 border-b">
+        <div class="flex justify-between items-center mb-4">
             <h1 class="text-3xl font-black text-gray-800 tracking-tighter">Kuchařka</h1>
             <div>
                 <button id="login-btn" onclick="login()" class="text-xs font-bold text-gray-400 border px-3 py-2 rounded-xl">Login</button>
@@ -146,7 +172,7 @@
     <div id="recipe-list" class="p-6 space-y-4"></div>
 
     <div id="admin-ui" class="hidden fixed bottom-8 left-1/2 -translate-x-1/2 z-50">
-        <button onclick="openAddModal()" class="bg-orange-500 text-white w-16 h-16 rounded-full flex items-center justify-center shadow-2xl active:scale-95 transition-transform">
+        <button onclick="openAddModal()" class="bg-orange-500 text-white w-16 h-16 rounded-full flex items-center justify-center shadow-2xl active:scale-95">
             <i class="fas fa-plus text-2xl"></i>
         </button>
     </div>
@@ -154,39 +180,57 @@
 
 <div id="detail-modal" class="hidden fixed inset-0 z-50 bg-black/90 flex items-end justify-center">
     <div class="bg-white w-full max-w-md h-[92vh] rounded-t-[3rem] overflow-hidden flex flex-col">
-        <div id="detail-img" class="h-72 bg-cover bg-center relative">
-            <button onclick="closeModal('detail-modal')" class="absolute top-6 right-6 bg-black/50 backdrop-blur-md text-white w-12 h-12 rounded-full flex items-center justify-center border border-white/30 shadow-2xl active:scale-90 transition">
-                <i class="fas fa-times text-xl"></i>
+        <div id="detail-img" class="h-64 bg-cover bg-center relative">
+            <button onclick="closeModal('detail-modal')" class="absolute top-6 right-6 bg-black/50 text-white w-12 h-12 rounded-full flex items-center justify-center shadow-2xl">
+                <i class="fas fa-times"></i>
             </button>
         </div>
-        <div class="p-8 overflow-y-auto flex-1 break-words">
-            <h2 id="detail-title" class="text-3xl font-extrabold mb-3 text-gray-900"></h2>
+        <div class="p-8 overflow-y-auto flex-1">
+            <h2 id="detail-title" class="text-3xl font-extrabold mb-3 text-gray-900 leading-tight"></h2>
             <div id="detail-meta" class="mb-6 flex gap-3"></div>
-            <div class="space-y-6">
-                <section><h3 class="text-xs font-black uppercase text-gray-400 tracking-widest mb-3 text-left">Ingredience</h3><p id="detail-ingredients" class="p-5 bg-orange-50 rounded-2xl text-gray-800 leading-relaxed text-left"></p></section>
-                <section><h3 class="text-xs font-black uppercase text-gray-400 tracking-widest mb-3 text-left">Postup přípravy</h3><p id="detail-steps" class="text-gray-700 leading-loose text-left"></p></section>
+            
+            <div class="bg-gray-50 p-4 rounded-2xl mb-6 flex items-center justify-between">
+                <span class="text-sm font-bold text-gray-500 uppercase">Násobitel dávky:</span>
+                <input type="number" id="multiplier" value="1" step="0.1" min="0.1" oninput="updateIngredientScaling()" 
+                       class="w-20 p-2 rounded-xl border-none font-bold text-orange-600 text-center focus:ring-2 focus:ring-orange-500 outline-none">
             </div>
+
+            <section class="mb-8 text-left">
+                <h3 class="text-xs font-black uppercase text-gray-400 tracking-widest mb-3">Ingredience</h3>
+                <div id="detail-ingredients-list" class="space-y-2"></div>
+            </section>
+            
+            <section class="text-left">
+                <h3 class="text-xs font-black uppercase text-gray-400 tracking-widest mb-3">Postup přípravy</h3>
+                <p id="detail-steps" class="text-gray-700 leading-loose"></p>
+            </section>
         </div>
     </div>
 </div>
 
 <div id="add-modal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-end justify-center">
     <div class="bg-white w-full max-w-md rounded-t-[2.5rem] p-8 max-h-[95vh] overflow-y-auto">
-        <h2 id="modal-title-text" class="text-2xl font-bold mb-6 text-gray-800 text-left">Nový recept</h2>
+        <h2 id="modal-title-text" class="text-2xl font-bold mb-6 text-gray-800">Nový recept</h2>
         <div class="space-y-4">
-            <input type="text" id="new-title" placeholder="Název" class="w-full p-4 bg-gray-50 rounded-2xl outline-none focus:ring-2 focus:ring-orange-500">
+            <input type="text" id="new-title" placeholder="Název" class="w-full p-4 bg-gray-50 rounded-2xl outline-none">
             <div class="flex gap-3">
-                <input type="number" id="new-time" placeholder="Minuty" class="w-1/2 p-4 bg-gray-50 rounded-2xl outline-none">
-                <select id="new-difficulty" class="w-1/2 p-4 bg-gray-50 rounded-2xl outline-none border-none">
-                    <option value="1">Lehké 👨‍🍳</option><option value="2">Střední 👨‍🍳👨‍🍳</option><option value="3">Těžké 👨‍🍳👨‍🍳👨‍🍳</option>
+                <input type="number" id="new-time" placeholder="Čas" class="w-1/2 p-4 bg-gray-50 rounded-2xl">
+                <select id="new-difficulty" class="w-1/2 p-4 bg-gray-50 rounded-2xl">
+                    <option value="1">Lehké</option><option value="2">Střední</option><option value="3">Těžké</option>
                 </select>
             </div>
-            <textarea id="new-ingredients" placeholder="Seznam ingrediencí..." class="w-full p-4 bg-gray-50 rounded-2xl h-24 outline-none"></textarea>
+            
+            <div class="border-t pt-4">
+                <h3 class="font-bold text-sm mb-2 text-gray-400 uppercase">Ingredience</h3>
+                <div id="ingredients-editor" class="mb-2 text-left"></div>
+                <button onclick="addIngredientField()" class="text-orange-500 text-sm font-bold">+ Přidat položku</button>
+            </div>
+
             <textarea id="new-steps" placeholder="Postup..." class="w-full p-4 bg-gray-50 rounded-2xl h-32 outline-none"></textarea>
             <input type="file" id="img-input" class="hidden" onchange="handleImg(this)" accept="image/*">
-            <button onclick="document.getElementById('img-input').click()" class="w-full p-4 border-2 border-dashed border-gray-200 rounded-2xl text-gray-400 font-bold">Změnit/přidat fotku</button>
-            <div id="preview-box" class="hidden"><img id="preview-el" src="" class="w-full h-40 object-cover rounded-2xl border"></div>
-            <button id="save-btn" onclick="saveRecipe()" class="w-full bg-orange-500 text-white py-5 rounded-2xl font-bold text-xl shadow-lg mt-4">Uložit do cloudu</button>
+            <button onclick="document.getElementById('img-input').click()" class="w-full p-4 border-2 border-dashed rounded-2xl text-gray-400">Fotka jídla</button>
+            <div id="preview-box" class="hidden"><img id="preview-el" src="" class="w-full h-40 object-cover rounded-2xl"></div>
+            <button id="save-btn" onclick="saveRecipe()" class="w-full bg-orange-500 text-white py-5 rounded-2xl font-bold text-xl mt-4">Uložit do cloudu</button>
             <button onclick="closeModal('add-modal')" class="w-full py-2 text-gray-400 font-bold">Zrušit</button>
         </div>
     </div>
@@ -194,17 +238,16 @@
 
 <script>
     window.allRecipes = [];
-    window.currentImgData = "";
-    function closeModal(id) { 
-        document.getElementById(id).classList.add('hidden'); 
-        document.body.style.overflow = 'auto'; 
-    }
+    window.currentActiveRecipe = null;
+
+    function closeModal(id) { document.getElementById(id).classList.add('hidden'); document.body.style.overflow = 'auto'; }
+    
     function openAddModal() { 
         window.editingId = null;
         document.getElementById('modal-title-text').innerText = "Nový recept";
-        document.getElementById('save-btn').innerText = "Uložit do cloudu";
         document.getElementById('new-title').value = ''; 
-        document.getElementById('new-ingredients').value = '';
+        document.getElementById('ingredients-editor').innerHTML = "";
+        addIngredientField(); // Začít s jedním prázdným polem
         document.getElementById('new-steps').value = '';
         document.getElementById('preview-box').classList.add('hidden');
         window.currentImgData = "";
@@ -221,10 +264,12 @@
             const card = document.createElement('div');
             card.className = "bg-white rounded-[2rem] p-3 shadow-md flex items-center gap-4 cursor-pointer border border-gray-50";
             card.onclick = () => {
+                window.currentActiveRecipe = r;
                 document.getElementById('detail-img').style.backgroundImage = `url(${r.img})`;
                 document.getElementById('detail-title').innerText = r.title;
-                document.getElementById('detail-meta').innerHTML = `<span class="bg-orange-50 text-orange-600 px-4 py-2 rounded-full text-xs font-black uppercase">${r.time} min</span> <span class="text-sm pt-1">${"👨‍🍳".repeat(r.diff)}</span>`;
-                document.getElementById('detail-ingredients').innerText = r.ing;
+                document.getElementById('detail-meta').innerHTML = `<span class="bg-orange-50 text-orange-600 px-4 py-2 rounded-full text-xs font-black uppercase">${r.time} min</span> <span>${"👨‍🍳".repeat(r.diff)}</span>`;
+                document.getElementById('multiplier').value = 1;
+                updateIngredientScaling();
                 document.getElementById('detail-steps').innerText = r.steps;
                 document.getElementById('detail-modal').classList.remove('hidden');
                 document.body.style.overflow = 'hidden';
@@ -237,13 +282,31 @@
                 </div>
                 <div class="flex flex-col gap-2">
                     ${window.userLoggedIn ? `
-                        <button onclick="event.stopPropagation(); editRecipe('${r.id}')" class="p-2 text-blue-300 hover:text-blue-500"><i class="fas fa-edit"></i></button>
-                        <button onclick="event.stopPropagation(); deleteRecipe('${r.id}')" class="p-2 text-gray-200 hover:text-red-500"><i class="fas fa-trash"></i></button>
+                        <button onclick="event.stopPropagation(); editRecipe('${r.id}')" class="p-2 text-blue-300"><i class="fas fa-edit"></i></button>
+                        <button onclick="event.stopPropagation(); deleteRecipe('${r.id}')" class="p-2 text-gray-100"><i class="fas fa-trash"></i></button>
                     ` : '<i class="fas fa-chevron-right text-gray-200 pr-2"></i>'}
                 </div>
             `;
             list.appendChild(card);
         });
+    }
+
+    window.updateIngredientScaling = () => {
+        const m = parseFloat(document.getElementById('multiplier').value) || 1;
+        const container = document.getElementById('detail-ingredients-list');
+        container.innerHTML = "";
+        
+        if (window.currentActiveRecipe.ingredients) {
+            window.currentActiveRecipe.ingredients.forEach(i => {
+                const scaledAmount = (i.amount * m).toLocaleString('cs-CZ');
+                const p = document.createElement('p');
+                p.className = "text-gray-700 flex justify-between border-b border-gray-50 pb-1";
+                p.innerHTML = `<span>${i.name}</span> <span class="font-bold text-orange-600">${scaledAmount} ${i.unit}</span>`;
+                container.appendChild(p);
+            });
+        } else if (window.currentActiveRecipe.ing) { // Starý formát
+            container.innerHTML = `<p class="text-gray-400 italic">Tento recept používá starý formát a nelze jej automaticky přepočítat. Upravte jej v editoru.</p><p class="mt-2">${window.currentActiveRecipe.ing}</p>`;
+        }
     }
 </script>
 </body>
