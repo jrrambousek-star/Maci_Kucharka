@@ -3,10 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Moje Kuchařka - Opravená verze</title>
+    <title>Marcelčina Kuchařka</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
+    <style>
+        /* Speciální úprava pro tisk */
+        @media print {
+            body { background: white !important; }
+            #detail-modal { position: absolute !important; display: block !important; background: white !important; }
+            .no-print, #login-btn, #logout-btn, #admin-ui, header, #multiplier-box, button { display: none !important; }
+            #detail-modal .bg-white { box-shadow: none !important; width: 100% !important; max-width: none !important; height: auto !important; position: static !important; border: none !important; }
+            #detail-img { height: 300px !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+            .overflow-y-auto { overflow: visible !important; }
+            #detail-title { margin-top: 20px; }
+        }
+    </style>
+
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, updateDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
@@ -26,6 +39,7 @@
         const auth = getAuth(app);
 
         window.editingId = null;
+        window.currentImgData = "";
 
         // AUTH
         window.login = async () => {
@@ -43,7 +57,7 @@
             renderRecipes(); 
         });
 
-        // IMAGE
+        // OBRÁZKY
         window.handleImg = (input) => {
             if (input.files && input.files[0]) {
                 const reader = new FileReader();
@@ -67,51 +81,60 @@
             }
         };
 
-        // INGREDIENTS EDITOR
+        // INGREDIENCE EDITOR
         window.addIngredientField = (amount = "", unit = "", name = "") => {
             const container = document.getElementById('ingredients-editor');
             const div = document.createElement('div');
-            div.className = "flex gap-2 mb-2 ingredient-row text-left";
+            div.className = "flex gap-2 mb-2 ingredient-row";
             div.innerHTML = `
                 <input type="number" placeholder="Množ." step="any" value="${amount}" class="w-20 p-2 bg-gray-50 rounded-lg ing-amount text-sm">
                 <input type="text" placeholder="Jedn." value="${unit}" class="w-16 p-2 bg-gray-50 rounded-lg ing-unit text-sm">
-                <input type="text" placeholder="Ingredience" value="${name}" class="flex-1 p-2 bg-gray-50 rounded-lg ing-name text-sm">
-                <button onclick="this.parentElement.remove()" class="text-red-400 px-1">&times;</button>
+                <input type="text" placeholder="Název" value="${name}" class="flex-1 p-2 bg-gray-50 rounded-lg ing-name text-sm">
+                <button onclick="this.parentElement.remove()" class="text-red-400 p-2">&times;</button>
             `;
             container.appendChild(div);
         };
 
-        // SAVE
+        // SAVE / EDIT / DELETE
         window.saveRecipe = async () => {
             const title = document.getElementById('new-title').value.trim();
-            if (!title) return alert("Zadejte název!");
-
-            const ingRows = document.querySelectorAll('.ingredient-row');
-            const ingredientsArr = Array.from(ingRows).map(row => ({
+            if (!title) return alert("Název je povinný!");
+            const ingredients = Array.from(document.querySelectorAll('.ingredient-row')).map(row => ({
                 amount: row.querySelector('.ing-amount').value === "" ? null : parseFloat(row.querySelector('.ing-amount').value),
                 unit: row.querySelector('.ing-unit').value.trim(),
                 name: row.querySelector('.ing-name').value.trim()
             })).filter(i => i.name !== "");
 
-            const data = {
-                title,
-                time: parseInt(document.getElementById('new-time').value) || 0,
-                diff: parseInt(document.getElementById('new-difficulty').value) || 1,
-                steps: document.getElementById('new-steps').value.trim(),
-                ingredients: ingredientsArr,
-                img: window.currentImgData || "https://images.unsplash.com/photo-1495195129352-aed325a55b65?w=400",
-                createdAt: Date.now()
-            };
-
+            const data = { title, time: parseInt(document.getElementById('new-time').value) || 0, diff: parseInt(document.getElementById('new-difficulty').value) || 1, steps: document.getElementById('new-steps').value.trim(), ingredients, img: window.currentImgData || "https://images.unsplash.com/photo-1495195129352-aed325a55b65?w=400" };
             try {
-                if (window.editingId) {
-                    await updateDoc(doc(db, "recepty", window.editingId), data);
-                } else {
-                    await addDoc(collection(db, "recepty"), data);
-                }
+                if (window.editingId) { await updateDoc(doc(db, "recepty", window.editingId), data); }
+                else { data.createdAt = Date.now(); await addDoc(collection(db, "recepty"), data); }
                 closeModal('add-modal');
-            } catch (e) { alert("Chyba při ukládání."); }
+            } catch (e) { alert("Chyba."); }
         };
+
+        window.deleteRecipe = async (id) => { if (confirm("Opravdu smazat?")) await deleteDoc(doc(db, "recepty", id)); };
+
+        window.editRecipe = (id) => {
+            const r = window.allRecipes.find(x => x.id === id);
+            if(!r) return;
+            window.editingId = id;
+            document.getElementById('modal-title-text').innerText = "Upravit recept";
+            document.getElementById('new-title').value = r.title;
+            document.getElementById('new-time').value = r.time;
+            document.getElementById('new-difficulty').value = r.diff || 1;
+            document.getElementById('new-steps').value = r.steps;
+            document.getElementById('ingredients-editor').innerHTML = "";
+            if (r.ingredients && Array.isArray(r.ingredients)) { r.ingredients.forEach(i => addIngredientField(i.amount, i.unit, i.name)); }
+            else { addIngredientField("", "", r.ing || ""); }
+            window.currentImgData = r.img;
+            document.getElementById('preview-el').src = r.img;
+            document.getElementById('preview-box').classList.remove('hidden');
+            document.getElementById('add-modal').classList.remove('hidden');
+        };
+
+        // TISK
+        window.printRecipe = () => { window.print(); };
 
         onSnapshot(query(collection(db, "recepty"), orderBy("createdAt", "desc")), (snap) => {
             window.allRecipes = [];
@@ -122,7 +145,7 @@
 </head>
 <body class="bg-gray-100 font-sans">
 
-<div class="max-w-md mx-auto min-h-screen bg-white shadow-2xl pb-24 relative text-center">
+<div class="max-w-md mx-auto min-h-screen bg-white shadow-2xl pb-24 relative no-print">
     <header class="bg-white/95 backdrop-blur-md sticky top-0 z-40 px-6 py-5 border-b">
         <div class="flex justify-between items-center mb-4 text-left">
             <h1 class="text-3xl font-black text-gray-800 tracking-tighter">Kuchařka</h1>
@@ -131,7 +154,7 @@
                 <button id="logout-btn" onclick="logout()" class="hidden text-xs font-bold text-red-400 border border-red-50 px-3 py-2 rounded-xl">Odhlásit</button>
             </div>
         </div>
-        <input type="text" id="search" oninput="renderRecipes()" placeholder="Najít recept..." class="w-full px-5 py-3 bg-gray-100 rounded-2xl outline-none focus:ring-2 focus:ring-orange-500 transition-all">
+        <input type="text" id="search" oninput="renderRecipes()" placeholder="Najít recept..." class="w-full px-5 py-3 bg-gray-100 rounded-2xl outline-none focus:ring-2 focus:ring-orange-500 transition-all text-sm">
     </header>
 
     <div id="recipe-list" class="p-6 space-y-4"></div>
@@ -144,58 +167,61 @@
 </div>
 
 <div id="detail-modal" class="hidden fixed inset-0 z-50 bg-black/90 flex items-end justify-center">
-    <div class="bg-white w-full max-w-md h-[92vh] rounded-t-[3rem] overflow-hidden flex flex-col">
+    <div class="bg-white w-full max-w-md h-[92vh] rounded-t-[3rem] overflow-hidden flex flex-col relative">
         <div id="detail-img" class="h-64 bg-cover bg-center relative">
-            <button onclick="closeModal('detail-modal')" class="absolute top-6 right-6 bg-black/50 text-white w-12 h-12 rounded-full flex items-center justify-center">
-                <i class="fas fa-times"></i>
-            </button>
+            <div class="absolute top-6 right-6 flex gap-2 no-print">
+                <button onclick="printRecipe()" class="bg-white/90 text-gray-800 w-10 h-10 rounded-full flex items-center justify-center shadow-lg">
+                    <i class="fas fa-print"></i>
+                </button>
+                <button onclick="closeModal('detail-modal')" class="bg-black/50 text-white w-10 h-10 rounded-full flex items-center justify-center shadow-lg">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
         </div>
-        <div class="p-8 overflow-y-auto flex-1">
-            <h2 id="detail-title" class="text-3xl font-extrabold mb-3 text-gray-900 leading-tight text-left"></h2>
-            <div id="detail-meta" class="mb-6 flex gap-3"></div>
+        <div class="p-8 overflow-y-auto flex-1 bg-white">
+            <h2 id="detail-title" class="text-3xl font-extrabold mb-3 text-gray-900 text-left"></h2>
+            <div id="detail-meta" class="mb-6 flex gap-3 text-left"></div>
             
-            <div class="bg-gray-50 p-4 rounded-2xl mb-6 flex items-center justify-between">
-                <span class="text-xs font-black text-gray-400 uppercase">Dávka:</span>
+            <div id="multiplier-box" class="bg-gray-50 p-4 rounded-2xl mb-6 flex items-center justify-between no-print">
+                <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest">Přepočet dávky:</span>
                 <input type="number" id="multiplier" value="1" step="0.1" min="0.1" oninput="updateIngredientScaling()" 
-                       class="w-20 p-2 rounded-xl border-none font-bold text-orange-600 text-center bg-white shadow-sm outline-none">
+                       class="w-16 p-2 rounded-xl border-none font-bold text-orange-600 text-center bg-white shadow-sm outline-none">
             </div>
 
             <section class="mb-8 text-left">
-                <h3 class="text-xs font-black uppercase text-gray-400 tracking-widest mb-3">Ingredience</h3>
+                <h3 class="text-xs font-black uppercase text-gray-400 tracking-widest mb-3 border-b pb-1">Ingredience</h3>
                 <div id="detail-ingredients-list" class="space-y-2"></div>
             </section>
             
             <section class="text-left pb-10">
-                <h3 class="text-xs font-black uppercase text-gray-400 tracking-widest mb-3">Postup přípravy</h3>
-                <p id="detail-steps" class="text-gray-700 leading-relaxed whitespace-pre-line"></p>
+                <h3 class="text-xs font-black uppercase text-gray-400 tracking-widest mb-3 border-b pb-1">Postup přípravy</h3>
+                <p id="detail-steps" class="text-gray-700 leading-relaxed whitespace-pre-line text-sm"></p>
             </section>
         </div>
     </div>
 </div>
 
 <div id="add-modal" class="hidden fixed inset-0 z-50 bg-black/80 flex items-end justify-center">
-    <div class="bg-white w-full max-w-md rounded-t-[2.5rem] p-8 max-h-[95vh] overflow-y-auto text-center">
-        <h2 id="modal-title-text" class="text-2xl font-bold mb-6 text-gray-800">Nový recept</h2>
+    <div class="bg-white w-full max-w-md rounded-t-[2.5rem] p-8 max-h-[95vh] overflow-y-auto">
+        <h2 id="modal-title-text" class="text-2xl font-bold mb-6 text-gray-800 text-center text-left">Nový recept</h2>
         <div class="space-y-4">
             <input type="text" id="new-title" placeholder="Název" class="w-full p-4 bg-gray-50 rounded-2xl outline-none">
             <div class="flex gap-3">
-                <input type="number" id="new-time" placeholder="Čas (min)" class="w-1/2 p-4 bg-gray-50 rounded-2xl">
-                <select id="new-difficulty" class="w-1/2 p-4 bg-gray-50 rounded-2xl">
+                <input type="number" id="new-time" placeholder="Minuty" class="w-1/2 p-4 bg-gray-50 rounded-2xl outline-none">
+                <select id="new-difficulty" class="w-1/2 p-4 bg-gray-50 rounded-2xl outline-none">
                     <option value="1">Lehké</option><option value="2">Střední</option><option value="3">Těžké</option>
                 </select>
             </div>
-            
-            <div class="border-t pt-4">
-                <h3 class="font-bold text-xs mb-2 text-gray-400 uppercase text-left">Ingredience</h3>
+            <div class="border-t pt-4 text-left">
+                <h3 class="font-bold text-xs mb-2 text-gray-400 uppercase">Ingredience</h3>
                 <div id="ingredients-editor"></div>
                 <button onclick="addIngredientField()" class="text-orange-500 text-sm font-bold mt-2">+ Přidat položku</button>
             </div>
-
-            <textarea id="new-steps" placeholder="Postup..." class="w-full p-4 bg-gray-50 rounded-2xl h-32 outline-none text-left"></textarea>
+            <textarea id="new-steps" placeholder="Postup..." class="w-full p-4 bg-gray-50 rounded-2xl h-32 outline-none text-sm"></textarea>
             <input type="file" id="img-input" class="hidden" onchange="handleImg(this)" accept="image/*">
-            <button onclick="document.getElementById('img-input').click()" class="w-full p-4 border-2 border-dashed rounded-2xl text-gray-400">Fotka jídla</button>
+            <button onclick="document.getElementById('img-input').click()" class="w-full p-4 border-2 border-dashed rounded-2xl text-gray-400 text-sm font-bold uppercase tracking-widest">Fotka</button>
             <div id="preview-box" class="hidden"><img id="preview-el" src="" class="w-full h-40 object-cover rounded-2xl"></div>
-            <button id="save-btn" onclick="saveRecipe()" class="w-full bg-orange-500 text-white py-5 rounded-2xl font-bold text-xl mt-4">Uložit</button>
+            <button onclick="saveRecipe()" class="w-full bg-orange-500 text-white py-5 rounded-2xl font-bold text-xl mt-4 shadow-xl">Uložit</button>
             <button onclick="closeModal('add-modal')" class="w-full py-2 text-gray-400 font-bold">Zrušit</button>
         </div>
     </div>
@@ -204,21 +230,8 @@
 <script>
     window.allRecipes = [];
     window.currentActiveRecipe = null;
-
     function closeModal(id) { document.getElementById(id).classList.add('hidden'); document.body.style.overflow = 'auto'; }
-    
-    function openAddModal() { 
-        window.editingId = null;
-        document.getElementById('modal-title-text').innerText = "Nový recept";
-        document.getElementById('new-title').value = ''; 
-        document.getElementById('ingredients-editor').innerHTML = "";
-        addIngredientField();
-        document.getElementById('new-steps').value = '';
-        document.getElementById('preview-box').classList.add('hidden');
-        window.currentImgData = "";
-        document.getElementById('add-modal').classList.remove('hidden'); 
-    }
-
+    function openAddModal() { window.editingId = null; document.getElementById('modal-title-text').innerText = "Nový recept"; document.getElementById('new-title').value = ''; document.getElementById('ingredients-editor').innerHTML = ""; addIngredientField(); document.getElementById('new-steps').value = ''; document.getElementById('preview-box').classList.add('hidden'); window.currentImgData = ""; document.getElementById('add-modal').classList.remove('hidden'); }
     function renderRecipes() {
         const list = document.getElementById('recipe-list');
         const q = document.getElementById('search').value.toLowerCase();
@@ -230,49 +243,32 @@
                 window.currentActiveRecipe = r;
                 document.getElementById('detail-img').style.backgroundImage = `url(${r.img})`;
                 document.getElementById('detail-title').innerText = r.title;
-                document.getElementById('detail-meta').innerHTML = `<span class="bg-orange-50 text-orange-600 px-4 py-2 rounded-full text-xs font-black uppercase">${r.time} min</span> <span>${"👨‍🍳".repeat(r.diff || 1)}</span>`;
+                document.getElementById('detail-meta').innerHTML = `<span class="bg-orange-50 text-orange-600 px-4 py-2 rounded-full text-[10px] font-black uppercase">${r.time} min</span> <span>${"👨‍🍳".repeat(r.diff || 1)}</span>`;
                 document.getElementById('multiplier').value = 1;
                 updateIngredientScaling();
                 document.getElementById('detail-steps').innerText = r.steps;
                 document.getElementById('detail-modal').classList.remove('hidden');
+                document.body.style.overflow = 'hidden';
             };
-            card.innerHTML = `
-                <img src="${r.img}" class="w-20 h-20 rounded-2xl object-cover">
-                <div class="flex-1 text-left overflow-hidden">
-                    <h3 class="font-bold text-lg text-gray-800 truncate">${r.title}</h3>
-                    <div class="text-xs font-bold text-gray-400 uppercase">${r.time} min</div>
-                </div>
-                <div class="flex flex-col gap-1">
-                    ${window.userLoggedIn ? `
-                        <button onclick="event.stopPropagation(); editRecipe('${r.id}')" class="p-2 text-blue-400"><i class="fas fa-edit"></i></button>
-                        <button onclick="event.stopPropagation(); deleteRecipe('${r.id}')" class="p-2 text-gray-200"><i class="fas fa-trash"></i></button>
-                    ` : '<i class="fas fa-chevron-right text-gray-200 pr-2"></i>'}
-                </div>
-            `;
+            card.innerHTML = `<img src="${r.img}" class="w-16 h-16 rounded-2xl object-cover"><div class="flex-1 text-left overflow-hidden"><h3 class="font-bold text-gray-800 truncate">${r.title}</h3><div class="text-[10px] font-bold text-gray-400 uppercase">${r.time} min</div></div><div class="flex flex-col gap-1">${window.userLoggedIn ? `<button onclick="event.stopPropagation(); editRecipe('${r.id}')" class="p-2 text-blue-400"><i class="fas fa-edit"></i></button><button onclick="event.stopPropagation(); deleteRecipe('${r.id}')" class="p-2 text-red-200"><i class="fas fa-trash"></i></button>` : '<i class="fas fa-chevron-right text-gray-200 pr-2"></i>'}</div>`;
             list.appendChild(card);
         });
     }
-
     window.updateIngredientScaling = () => {
         const m = parseFloat(document.getElementById('multiplier').value) || 1;
         const container = document.getElementById('detail-ingredients-list');
         container.innerHTML = "";
         const recipe = window.currentActiveRecipe;
-        
         if (recipe.ingredients && Array.isArray(recipe.ingredients)) {
             recipe.ingredients.forEach(i => {
                 const val = (i.amount && i.amount !== 0) ? (i.amount * m).toLocaleString('cs-CZ') : "";
                 const p = document.createElement('p');
-                p.className = "text-gray-700 flex justify-between border-b border-gray-50 pb-1";
+                p.className = "text-gray-700 flex justify-between border-b border-gray-50 pb-1 text-sm";
                 p.innerHTML = `<span>${i.name}</span> <span class="font-bold text-orange-600">${val} ${i.unit || ''}</span>`;
                 container.appendChild(p);
             });
-        } else {
-            container.innerHTML = `<p class="text-gray-500">${recipe.ing || 'Bez ingrediencí'}</p>`;
-        }
+        } else { container.innerHTML = `<p class="text-xs text-gray-400 italic">Starý formát: ${recipe.ing || 'Bez ingrediencí'}</p>`; }
     };
-
-    window.deleteRecipe = async (id) => { if (confirm("Smazat?")) { await deleteDoc(doc(db, "recepty", id)); } };
 </script>
 </body>
 </html>
